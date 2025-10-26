@@ -1,0 +1,116 @@
+name: Playwright Admin E2E
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  playwright-admin:
+    name: Playwright E2E (Admin)
+    runs-on: ubuntu-latest
+    needs: [bootstrap-backend]
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: bagisto_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.1"
+          extensions: mbstring, exif, pcntl, bcmath, intl, pdo_mysql
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Copy .env
+        run: cp .env.example .env
+
+      - name: Configure DB env
+        run: |
+          php -r "file_put_contents('.env', preg_replace('/^DB_DATABASE=.*/m', 'DB_DATABASE=bagisto_test', file_get_contents('.env')));"
+          php -r "file_put_contents('.env', preg_replace('/^DB_USERNAME=.*/m', 'DB_USERNAME=root', file_get_contents('.env')));"
+          php -r "file_put_contents('.env', preg_replace('/^DB_PASSWORD=.*/m', 'DB_PASSWORD=root', file_get_contents('.env')));"
+          php -r "file_put_contents('.env', preg_replace('/^APP_ENV=.*/m', 'APP_ENV=testing', file_get_contents('.env')));"
+
+      - name: Composer & migrate
+        run: |
+          composer install --no-interaction --prefer-dist --no-progress
+          php artisan key:generate
+          php artisan migrate --force
+
+      - name: Node deps & build
+        run: |
+          npm ci || npm install
+          npm run build || echo "No build step"
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Start Laravel server
+        run: php artisan serve --host=127.0.0.1 --port=8000 &
+
+      - name: Wait for server
+        run: |
+          for i in `seq 1 30`; do
+            nc -z 127.0.0.1 8000 && echo 'Server is up' && exit 0
+            echo 'Waiting for server...'; sleep 2
+          done
+          echo 'Server not responding' && exit 1
+
+      - name: Run Playwright admin tests
+        env:
+          BASE_URL: "http://127.0.0.1:8000"
+        run: |
+          npx playwright test tests/e2e/admin --reporter=line ||           npx playwright test --grep @admin --reporter=line ||           npx playwright test --reporter=line
+
+  bootstrap-backend:
+    name: Backend Bootstrap
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: bagisto_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.1"
+          extensions: mbstring, exif, pcntl, bcmath, intl, pdo_mysql
+      - run: cp .env.example .env
+      - name: Configure DB env
+        run: |
+          php -r "file_put_contents('.env', preg_replace('/^DB_DATABASE=.*/m', 'DB_DATABASE=bagisto_test', file_get_contents('.env')));"
+          php -r "file_put_contents('.env', preg_replace('/^DB_USERNAME=.*/m', 'DB_USERNAME=root', file_get_contents('.env')));"
+          php -r "file_put_contents('.env', preg_replace('/^DB_PASSWORD=.*/m', 'DB_PASSWORD=root', file_get_contents('.env')));"
+          php -r "file_put_contents('.env', preg_replace('/^APP_ENV=.*/m', 'APP_ENV=testing', file_get_contents('.env')));"
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - run: php artisan key:generate
+      - run: php artisan migrate --force
