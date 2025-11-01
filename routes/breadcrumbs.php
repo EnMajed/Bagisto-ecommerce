@@ -44,6 +44,7 @@ Breadcrumbs::for('addresses.edit', function (BreadcrumbTrail $trail, $entity) {
     $trail->push(trans('shop::app.customers.account.addresses.index.edit'), route('shop.customers.account.addresses.edit', $entity->id));
 });
 
+
 // Home > My Account > Orders
 Breadcrumbs::for('orders', function (BreadcrumbTrail $trail) {
     $trail->parent('account');
